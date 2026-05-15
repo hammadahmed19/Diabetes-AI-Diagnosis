@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DiabetesAI - Smart Diagnosis System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>🏥 DiabetesAI</h1>
+        <p class="subtitle">🤖 AI-Powered Diabetes Diagnosis & Medical Assessment</p>
+        
+        <!-- Tab Navigation -->
+        <div class="tab-navigation">
+            <button type="button" class="tab-btn active" onclick="switchTab('manual')">
+                📝 Manual Entry
+            </button>
+            <button type="button" class="tab-btn" onclick="switchTab('upload')">
+                📄 Upload Lab Report
+            </button>
+        </div>
+        
+        <!-- Upload Lab Report Section -->
+        <div id="uploadSection" class="tab-content" style="display: none;">
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📤</div>
+                <h3>Upload Your Lab Report</h3>
+                <p>Drag and drop your test report here, or click to browse</p>
+                <p class="upload-hint">Supported formats: JPG, PNG, PDF (Max 10MB)</p>
+                <input type="file" id="fileInput" accept="image/*,.pdf" style="display: none;">
+                <button type="button" class="btn-secondary" onclick="document.getElementById('fileInput').click()">
+                    Choose File
+                </button>
+            </div>
+            
+            <div id="uploadPreview" class="upload-preview hidden">
+                <h3>📋 Preview</h3>
+                <img id="previewImage" src="" alt="Preview">
+                <button type="button" class="btn-primary" onclick="processUploadedReport()">
+                    🔍 Extract Data from Report
+                </button>
+            </div>
+            
+            <div id="extractedData" class="extracted-data hidden">
+                <h3>✅ Extracted Information</h3>
+                <div id="extractedContent"></div>
+                <button type="button" class="btn-primary" onclick="useExtractedData()">
+                    Use This Data for Diagnosis
+                </button>
+            </div>
+        </div>
+        
+        <!-- Manual Entry Form -->
+        <form id="diagnosisForm" class="tab-content">
+            <div class="form-group">
+                <label>Patient Name:</label>
+                <input type="text" id="name" required>
+            </div>
+            
+            <div class="form-group">
+                <label>Age:</label>
+                <input type="number" id="age" min="1" max="120" required>
+            </div>
+            
+            <div class="form-group">
+                <label>Blood Glucose Level (mg/dL):</label>
+                <input type="number" id="glucose_level" step="0.1" required>
+                <small>Fasting: Normal < 100, Pre-diabetes 100-125, Diabetes ≥ 126</small>
+            </div>
+            
+            <div class="form-group">
+                <label>BMI (Body Mass Index):</label>
+                <input type="number" id="bmi" step="0.1" required>
+                <small>Calculate: weight(kg) / height(m)²</small>
+            </div>
+            
+            <div class="form-group">
+                <label>Family History of Diabetes:</label>
+                <select id="family_history">
+                    <option value="no">No</option>
+                    <option value="yes">Yes</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>Physical Activity Level:</label>
+                <select id="physical_activity">
+                    <option value="low">Low (Sedentary)</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="high">High (Active)</option>
+                </select>
+            </div>
+            
+            <button type="submit" class="btn-primary">Get Diagnosis</button>
+        </form>
+        
+        <div id="results" class="results hidden">
+            <h2>Diagnosis Results</h2>
+            <div id="diagnosisContent"></div>
+        </div>
+    </div>
+    
+    <script>
+        let uploadedFile = null;
+        let extractedTestData = null;
+        
+        // Tab switching
+        function switchTab(tab) {
+            const manualForm = document.getElementById('diagnosisForm');
+            const uploadSection = document.getElementById('uploadSection');
+            const tabs = document.querySelectorAll('.tab-btn');
+            
+            tabs.forEach(t => t.classList.remove('active'));
+            
+            if (tab === 'manual') {
+                manualForm.style.display = 'block';
+                uploadSection.style.display = 'none';
+                tabs[0].classList.add('active');
+            } else {
+                manualForm.style.display = 'none';
+                uploadSection.style.display = 'block';
+                tabs[1].classList.add('active');
+            }
+        }
+        
+        // File upload handling
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#667eea';
+            uploadArea.style.background = '#f0f4ff';
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.style.borderColor = '#ddd';
+            uploadArea.style.background = '#f8f9fa';
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#ddd';
+            uploadArea.style.background = '#f8f9fa';
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileSelect(files[0]);
+            }
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileSelect(e.target.files[0]);
+            }
+        });
+        
+        function handleFileSelect(file) {
+            if (file.size > 10 * 1024 * 1024) {
+                alert('File size must be less than 10MB');
+                return;
+            }
+            
+            uploadedFile = file;
+            
+            // Show preview
+            const previewDiv = document.getElementById('uploadPreview');
+            const previewImage = document.getElementById('previewImage');
+            
+            if (file.type === 'application/pdf') {
+                // For PDF, show a placeholder icon
+                previewImage.style.display = 'none';
+                const pdfPreview = document.createElement('div');
+                pdfPreview.id = 'pdfPreview';
+                pdfPreview.style.cssText = 'padding: 40px; text-align: center; background: #f8f9fa; border-radius: 10px; margin-bottom: 20px;';
+                pdfPreview.innerHTML = `
+                    <div style="font-size: 64px; margin-bottom: 15px;">📄</div>
+                    <h3 style="color: #333; margin-bottom: 10px;">${file.name}</h3>
+                    <p style="color: #666;">PDF Document Ready</p>
+                    <p style="color: #999; font-size: 0.9em;">Size: ${(file.size / 1024).toFixed(1)} KB</p>
+                `;
+                
+                // Remove old PDF preview if exists
+                const oldPreview = document.getElementById('pdfPreview');
+                if (oldPreview) oldPreview.remove();
+                
+                previewDiv.insertBefore(pdfPreview, previewDiv.querySelector('button'));
+            } else {
+                // For images, show actual preview
+                previewImage.style.display = 'block';
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    previewImage.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+                
+                // Remove PDF preview if exists
+                const oldPreview = document.getElementById('pdfPreview');
+                if (oldPreview) oldPreview.remove();
+            }
+            
+            previewDiv.classList.remove('hidden');
+        }
+        
+        async function processUploadedReport() {
+            if (!uploadedFile) return;
+            
+            const formData = new FormData();
+            formData.append('test_report', uploadedFile);
+            
+            try {
+                const response = await fetch('/parse-test-report', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    extractedTestData = result.data;
+                    displayExtractedData(result.data);
+                } else {
+                    alert('Error: ' + result.message);
+                }
+            } catch (error) {
+                alert('Error processing report: ' + error.message);
+            }
+        }
+        
+        function displayExtractedData(data) {
+            const content = document.getElementById('extractedContent');
+            let html = '<div class="data-grid">';
+            
+            if (data.patient_name) {
+                html += `<div class="data-item"><strong>Patient Name:</strong> ${data.patient_name}</div>`;
+            }
+            if (data.age) {
+                html += `<div class="data-item"><strong>Age:</strong> ${data.age} years</div>`;
+            }
+            if (data.test_date) {
+                html += `<div class="data-item"><strong>Test Date:</strong> ${data.test_date}</div>`;
+            }
+            if (data.glucose_level) {
+                html += `<div class="data-item"><strong>Glucose Level:</strong> ${data.glucose_level} mg/dL ${data.glucose_type ? '(' + data.glucose_type + ')' : ''}</div>`;
+            }
+            if (data.hba1c) {
+                html += `<div class="data-item"><strong>HbA1c:</strong> ${data.hba1c}%</div>`;
+            }
+            if (data.bmi) {
+                html += `<div class="data-item"><strong>BMI:</strong> ${data.bmi}</div>`;
+            }
+            if (data.weight) {
+                html += `<div class="data-item"><strong>Weight:</strong> ${data.weight} kg</div>`;
+            }
+            if (data.height) {
+                html += `<div class="data-item"><strong>Height:</strong> ${data.height} cm</div>`;
+            }
+            if (data.other_findings) {
+                html += `<div class="data-item full-width"><strong>Other Findings:</strong> ${data.other_findings}</div>`;
+            }
+            
+            html += '</div>';
+            content.innerHTML = html;
+            document.getElementById('extractedData').classList.remove('hidden');
+        }
+        
+        async function processUploadedReport() {
+            if (!uploadedFile) return;
+            
+            const formData = new FormData();
+            formData.append('test_report', uploadedFile);
+            
+            // Show loading
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = '⏳ Processing...';
+            
+            try {
+                const response = await fetch('/parse-test-report', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    extractedTestData = result.data;
+                    displayExtractedData(result.data);
+                    
+                    // If auto-diagnosis is available, show it immediately
+                    if (result.auto_diagnosis) {
+                        displayAutoDiagnosis(result.auto_diagnosis);
+                    }
+                } else {
+                    alert('Error: ' + result.message);
+                }
+            } catch (error) {
+                alert('Error processing report: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔍 Extract Data from Report';
+            }
+        }
+        
+        function displayAutoDiagnosis(diagnosis) {
+            const resultsDiv = document.getElementById('results');
+            const contentDiv = document.getElementById('diagnosisContent');
+            
+            let html = `
+                <div style="background: #e3f2fd; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #2196f3;">
+                    <h3 style="color: #1565c0; margin-bottom: 10px;">🤖 Automatic Diagnosis from Lab Report</h3>
+                    <p style="color: #666;">Your test results have been automatically analyzed.</p>
+                </div>
+                
+                <div class="diagnosis-card ${diagnosis.risk_level.toLowerCase()}">
+                    <h3>Diagnosis: ${diagnosis.diagnosis}</h3>
+                    <p><strong>Confidence:</strong> ${diagnosis.confidence}%</p>
+                    <p><strong>Risk Level:</strong> ${diagnosis.risk_level}</p>
+                    <p style="color: #667eea; font-size: 0.9em;">🤖 LLM-Powered Analysis</p>
+                </div>
+            `;
+            
+            if (diagnosis.reasoning) {
+                html += `
+                    <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                        <h3>🧠 Clinical Reasoning</h3>
+                        <p>${diagnosis.reasoning}</p>
+                        ${diagnosis.key_factors && diagnosis.key_factors.length > 0 ? 
+                            '<p><strong>Key Factors:</strong> ' + diagnosis.key_factors.join(', ') + '</p>' : ''}
+                    </div>
+                `;
+            }
+            
+            html += '<div class="prescription-section"><h3>📋 Medical Prescription</h3>';
+            
+            if (diagnosis.prescription.medications && diagnosis.prescription.medications.length > 0) {
+                html += '<h4>💊 Medications:</h4><ul>';
+                diagnosis.prescription.medications.forEach(med => {
+                    html += `<li>${med}</li>`;
+                });
+                html += '</ul>';
+            }
+            
+            if (diagnosis.prescription.diet && diagnosis.prescription.diet.length > 0) {
+                html += '<h4>🥗 Diet Recommendations:</h4><ul>';
+                diagnosis.prescription.diet.forEach(item => {
+                    html += `<li>${item}</li>`;
+                });
+                html += '</ul>';
+            }
+            
+            if (diagnosis.prescription.exercise && diagnosis.prescription.exercise.length > 0) {
+                html += '<h4>🏃 Exercise Plan:</h4><ul>';
+                diagnosis.prescription.exercise.forEach(item => {
+                    html += `<li>${item}</li>`;
+                });
+                html += '</ul>';
+            }
+            
+            if (diagnosis.prescription.lifestyle && diagnosis.prescription.lifestyle.length > 0) {
+                html += '<h4>🏃 Lifestyle Recommendations:</h4><ul>';
+                diagnosis.prescription.lifestyle.forEach(item => {
+                    html += `<li>${item}</li>`;
+                });
+                html += '</ul>';
+            }
+            
+            html += '<h4>📊 Monitoring:</h4><ul>';
+            diagnosis.prescription.monitoring.forEach(item => {
+                html += `<li>${item}</li>`;
+            });
+            html += '</ul>';
+            
+            html += `<p><strong>Follow-up:</strong> ${diagnosis.prescription.follow_up}</p>`;
+            
+            if (diagnosis.prescription.emergency_signs && diagnosis.prescription.emergency_signs.length > 0) {
+                html += '<div class="warnings"><h4>🚨 Emergency Signs - Seek Immediate Care:</h4><ul>';
+                diagnosis.prescription.emergency_signs.forEach(sign => {
+                    html += `<li>${sign}</li>`;
+                });
+                html += '</ul></div>';
+            }
+            
+            if (diagnosis.prescription.warnings && diagnosis.prescription.warnings.length > 0) {
+                html += '<div class="warnings"><h4>⚠️ Important Warnings:</h4><ul>';
+                diagnosis.prescription.warnings.forEach(warning => {
+                    html += `<li>${warning}</li>`;
+                });
+                html += '</ul></div>';
+            }
+            
+            if (diagnosis.prescription.additional_notes) {
+                html += `<p style="margin-top: 20px; font-style: italic;"><strong>Note:</strong> ${diagnosis.prescription.additional_notes}</p>`;
+            }
+            
+            html += '</div>';
+            
+            contentDiv.innerHTML = html;
+            resultsDiv.classList.remove('hidden');
+            resultsDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        function useExtractedData() {
+            if (!extractedTestData) return;
+            
+            // Switch to manual tab and populate form
+            switchTab('manual');
+            
+            if (extractedTestData.patient_name) {
+                document.getElementById('name').value = extractedTestData.patient_name;
+            }
+            if (extractedTestData.glucose_level) {
+                document.getElementById('glucose_level').value = extractedTestData.glucose_level;
+            }
+            if (extractedTestData.bmi) {
+                document.getElementById('bmi').value = extractedTestData.bmi;
+            }
+            
+            // Scroll to form
+            document.getElementById('diagnosisForm').scrollIntoView({ behavior: 'smooth' });
+            
+            alert('✅ Data populated! Please review and fill in any missing information, then submit for diagnosis.');
+        }
+        
+        document.getElementById('diagnosisForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = {
+                name: document.getElementById('name').value,
+                age: document.getElementById('age').value,
+                glucose_level: document.getElementById('glucose_level').value,
+                bmi: document.getElementById('bmi').value,
+                family_history: document.getElementById('family_history').value,
+                physical_activity: document.getElementById('physical_activity').value
+            };
+            
+            try {
+                const response = await fetch('/diagnose', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(formData)
+                });
+                
+                const result = await response.json();
+                displayResults(result);
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        });
+        
+        function displayResults(result) {
+            const resultsDiv = document.getElementById('results');
+            const contentDiv = document.getElementById('diagnosisContent');
+            
+            let html = `
+                <div class="diagnosis-card ${result.risk_level.toLowerCase()}">
+                    <h3>Diagnosis: ${result.diagnosis}</h3>
+                    <p><strong>Confidence:</strong> ${result.confidence}%</p>
+                    <p><strong>Risk Level:</strong> ${result.risk_level}</p>
+                    ${result.llm_powered ? '<p style="color: #667eea; font-size: 0.9em;">🤖 LLM-Powered Analysis</p>' : ''}
+                </div>
+            `;
+            
+            // Show reasoning if available (LLM feature)
+            if (result.reasoning) {
+                html += `
+                    <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                        <h3>🧠 Clinical Reasoning</h3>
+                        <p>${result.reasoning}</p>
+                        ${result.key_factors && result.key_factors.length > 0 ? 
+                            '<p><strong>Key Factors:</strong> ' + result.key_factors.join(', ') + '</p>' : ''}
+                    </div>
+                `;
+            }
+            
+            html += '<div class="prescription-section"><h3>📋 Medical Prescription</h3>';
+            
+            if (result.prescription.medications && result.prescription.medications.length > 0) {
+                html += '<h4>💊 Medications:</h4><ul>';
+                result.prescription.medications.forEach(med => {
+                    html += `<li>${med}</li>`;
+                });
+                html += '</ul>';
+            }
+            
+            // Diet recommendations (LLM feature)
+            if (result.prescription.diet && result.prescription.diet.length > 0) {
+                html += '<h4>🥗 Diet Recommendations:</h4><ul>';
+                result.prescription.diet.forEach(item => {
+                    html += `<li>${item}</li>`;
+                });
+                html += '</ul>';
+            }
+            
+            // Exercise recommendations (LLM feature)
+            if (result.prescription.exercise && result.prescription.exercise.length > 0) {
+                html += '<h4>🏃 Exercise Plan:</h4><ul>';
+                result.prescription.exercise.forEach(item => {
+                    html += `<li>${item}</li>`;
+                });
+                html += '</ul>';
+            }
+            
+            // Lifestyle (fallback)
+            if (result.prescription.lifestyle && result.prescription.lifestyle.length > 0) {
+                html += '<h4>🏃 Lifestyle Recommendations:</h4><ul>';
+                result.prescription.lifestyle.forEach(item => {
+                    html += `<li>${item}</li>`;
+                });
+                html += '</ul>';
+            }
+            
+            html += '<h4>📊 Monitoring:</h4><ul>';
+            result.prescription.monitoring.forEach(item => {
+                html += `<li>${item}</li>`;
+            });
+            html += '</ul>';
+            
+            html += `<p><strong>Follow-up:</strong> ${result.prescription.follow_up}</p>`;
+            
+            // Emergency signs (LLM feature)
+            if (result.prescription.emergency_signs && result.prescription.emergency_signs.length > 0) {
+                html += '<div class="warnings"><h4>🚨 Emergency Signs - Seek Immediate Care:</h4><ul>';
+                result.prescription.emergency_signs.forEach(sign => {
+                    html += `<li>${sign}</li>`;
+                });
+                html += '</ul></div>';
+            }
+            
+            if (result.prescription.warnings && result.prescription.warnings.length > 0) {
+                html += '<div class="warnings"><h4>⚠️ Important Warnings:</h4><ul>';
+                result.prescription.warnings.forEach(warning => {
+                    html += `<li>${warning}</li>`;
+                });
+                html += '</ul></div>';
+            }
+            
+            // Additional notes (LLM feature)
+            if (result.prescription.additional_notes) {
+                html += `<p style="margin-top: 20px; font-style: italic;"><strong>Note:</strong> ${result.prescription.additional_notes}</p>`;
+            }
+            
+            html += '</div>';
+            
+            contentDiv.innerHTML = html;
+            resultsDiv.classList.remove('hidden');
+            resultsDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+    </script>
+</body>
+</html>
