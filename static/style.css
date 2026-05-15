@@ -318,3 +318,32 @@ small {
         transform: translateY(0);
     }
 }
+
+/* Questionnaire styles */
+.questionnaire-section {
+    background: #f8f9fa;
+    padding: 25px;
+    border-radius: 10px;
+    margin-bottom: 25px;
+    border-left: 4px solid #667eea;
+}
+
+.questionnaire-section h3 {
+    color: #667eea;
+    margin-bottom: 20px;
+    font-size: 1.3em;
+}
+
+.questionnaire-input {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    font-size: 1em;
+    transition: border-color 0.3s;
+}
+
+.questionnaire-input:focus {
+    outline: none;
+    border-color: #667eea;
+}

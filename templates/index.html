@@ -16,6 +16,9 @@
             <button type="button" class="tab-btn active" onclick="switchTab('manual')">
                 📝 Manual Entry
             </button>
+            <button type="button" class="tab-btn" onclick="switchTab('questionnaire')">
+                📋 Questionnaire
+            </button>
             <button type="button" class="tab-btn" onclick="switchTab('upload')">
                 📄 Upload Lab Report
             </button>
@@ -49,6 +52,28 @@
                     Use This Data for Diagnosis
                 </button>
             </div>
+        </div>
+        
+        <!-- Questionnaire Section -->
+        <div id="questionnaireSection" class="tab-content" style="display: none;">
+            <div style="background: #e3f2fd; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                <h3>📋 Diabetes Risk Screening Questionnaire</h3>
+                <p><strong>No lab tests required!</strong> This comprehensive questionnaire assesses your diabetes risk based on symptoms, lifestyle, and medical history.</p>
+                <p style="margin-top: 10px; color: #666; font-size: 0.95em;">⚠️ This is a screening tool. Laboratory tests are recommended for definitive diagnosis.</p>
+            </div>
+            
+            <form id="questionnaireForm">
+                <!-- Basic Info -->
+                <div class="form-group">
+                    <label>Patient Name:</label>
+                    <input type="text" id="q_name" required>
+                </div>
+                
+                <!-- Questionnaire sections will be loaded here -->
+                <div id="questionnaireContent"></div>
+                
+                <button type="submit" class="btn-primary">🔍 Analyze with AI</button>
+            </form>
         </div>
         
         <!-- Manual Entry Form -->
@@ -104,23 +129,92 @@
     <script>
         let uploadedFile = null;
         let extractedTestData = null;
+        let questionnaireData = null;
+        
+        // Load questionnaire on page load
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const response = await fetch('/get-questionnaire');
+                questionnaireData = await response.json();
+                renderQuestionnaire();
+            } catch (error) {
+                console.error('Error loading questionnaire:', error);
+            }
+        });
+        
+        function renderQuestionnaire() {
+            if (!questionnaireData) return;
+            
+            const container = document.getElementById('questionnaireContent');
+            let html = '';
+            
+            questionnaireData.sections.forEach(section => {
+                html += `
+                    <div class="questionnaire-section">
+                        <h3>${section.title}</h3>
+                `;
+                
+                section.questions.forEach(question => {
+                    html += `<div class="form-group">`;
+                    html += `<label>${question.text}</label>`;
+                    
+                    if (question.type === 'yes_no') {
+                        html += `
+                            <select id="${question.id}" class="questionnaire-input">
+                                <option value="">-- Select --</option>
+                                <option value="yes">Yes</option>
+                                <option value="no">No</option>
+                            </select>
+                        `;
+                    } else if (question.type === 'yes_no_na') {
+                        html += `
+                            <select id="${question.id}" class="questionnaire-input">
+                                <option value="">-- Select --</option>
+                                <option value="yes">Yes</option>
+                                <option value="no">No</option>
+                                <option value="na">Not Applicable</option>
+                            </select>
+                        `;
+                    } else if (question.type === 'multiple_choice') {
+                        html += `<select id="${question.id}" class="questionnaire-input">`;
+                        html += `<option value="">-- Select --</option>`;
+                        question.options.forEach(option => {
+                            html += `<option value="${option.value}">${option.label}</option>`;
+                        });
+                        html += `</select>`;
+                    }
+                    
+                    html += `</div>`;
+                });
+                
+                html += `</div>`;
+            });
+            
+            container.innerHTML = html;
+        }
         
         // Tab switching
         function switchTab(tab) {
             const manualForm = document.getElementById('diagnosisForm');
             const uploadSection = document.getElementById('uploadSection');
+            const questionnaireSection = document.getElementById('questionnaireSection');
             const tabs = document.querySelectorAll('.tab-btn');
             
             tabs.forEach(t => t.classList.remove('active'));
             
+            manualForm.style.display = 'none';
+            uploadSection.style.display = 'none';
+            questionnaireSection.style.display = 'none';
+            
             if (tab === 'manual') {
                 manualForm.style.display = 'block';
-                uploadSection.style.display = 'none';
                 tabs[0].classList.add('active');
-            } else {
-                manualForm.style.display = 'none';
-                uploadSection.style.display = 'block';
+            } else if (tab === 'questionnaire') {
+                questionnaireSection.style.display = 'block';
                 tabs[1].classList.add('active');
+            } else if (tab === 'upload') {
+                uploadSection.style.display = 'block';
+                tabs[2].classList.add('active');
             }
         }
         
@@ -449,24 +543,89 @@
             }
         });
         
+        // Questionnaire form submission
+        document.getElementById('questionnaireForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // Collect questionnaire answers
+            const answers = {};
+            const inputs = document.querySelectorAll('.questionnaire-input');
+            inputs.forEach(input => {
+                if (input.value) {
+                    answers[input.id] = input.value;
+                }
+            });
+            
+            const formData = {
+                name: document.getElementById('q_name').value,
+                questionnaire_answers: answers
+            };
+            
+            // Show loading
+            const btn = e.target.querySelector('button[type="submit"]');
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '⏳ Analyzing...';
+            
+            try {
+                const response = await fetch('/diagnose-questionnaire', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(formData)
+                });
+                
+                const result = await response.json();
+                displayResults(result);
+            } catch (error) {
+                alert('Error: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        });
+        
         function displayResults(result) {
             const resultsDiv = document.getElementById('results');
             const contentDiv = document.getElementById('diagnosisContent');
             
-            let html = `
+            let html = '';
+            
+            // Show questionnaire-only mode notice
+            if (result.mode === 'questionnaire_only') {
+                html += `
+                    <div style="background: #fff3e0; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #ff9800;">
+                        <h3 style="color: #e65100; margin-bottom: 10px;">📋 Questionnaire-Based Risk Assessment</h3>
+                        <p style="color: #666;">This is a preliminary screening based on symptoms and risk factors. <strong>Laboratory tests are required for definitive diagnosis.</strong></p>
+                    </div>
+                `;
+            }
+            
+            html += `
                 <div class="diagnosis-card ${result.risk_level.toLowerCase()}">
-                    <h3>Diagnosis: ${result.diagnosis}</h3>
+                    <h3>Assessment: ${result.diagnosis}</h3>
                     <p><strong>Confidence:</strong> ${result.confidence}%</p>
                     <p><strong>Risk Level:</strong> ${result.risk_level}</p>
                     ${result.llm_powered ? '<p style="color: #667eea; font-size: 0.9em;">🤖 LLM-Powered Analysis</p>' : ''}
                 </div>
             `;
             
+            // Show questionnaire risk score if available
+            if (result.questionnaire_risk) {
+                html += `
+                    <div style="background: #e3f2fd; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #2196f3;">
+                        <h3 style="color: #1565c0; margin-bottom: 10px;">📊 Questionnaire Risk Score</h3>
+                        <p><strong>Score:</strong> ${result.questionnaire_risk.total_score}/${result.questionnaire_risk.max_score}</p>
+                        <p><strong>Risk Percentage:</strong> ${result.questionnaire_risk.risk_percentage}%</p>
+                        <p><strong>Risk Level:</strong> ${result.questionnaire_risk.risk_level}</p>
+                    </div>
+                `;
+            }
+            
             // Show reasoning if available (LLM feature)
             if (result.reasoning) {
                 html += `
                     <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
-                        <h3>🧠 Clinical Reasoning</h3>
+                        <h3>🧠 Clinical Assessment</h3>
                         <p>${result.reasoning}</p>
                         ${result.key_factors && result.key_factors.length > 0 ? 
                             '<p><strong>Key Factors:</strong> ' + result.key_factors.join(', ') + '</p>' : ''}
@@ -474,7 +633,23 @@
                 `;
             }
             
-            html += '<div class="prescription-section"><h3>📋 Medical Prescription</h3>';
+            // Show recommendations if available (questionnaire-only mode)
+            if (result.recommendations && result.recommendations.length > 0) {
+                html += `
+                    <div style="background: #e8f5e9; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #4caf50;">
+                        <h3 style="color: #2e7d32; margin-bottom: 10px;">🔬 Recommended Next Steps</h3>
+                        <ul style="margin-left: 20px; line-height: 1.8;">
+                `;
+                result.recommendations.forEach(rec => {
+                    html += `<li>${rec}</li>`;
+                });
+                html += `
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            html += '<div class="prescription-section"><h3>📋 Medical Recommendations</h3>';
             
             if (result.prescription.medications && result.prescription.medications.length > 0) {
                 html += '<h4>💊 Medications:</h4><ul>';

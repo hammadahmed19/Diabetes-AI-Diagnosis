@@ -8,6 +8,11 @@ from werkzeug.utils import secure_filename
 from models.llm_diagnosis import LLMDiagnosisModel
 from models.llm_prescription import LLMPrescriptionEngine
 from models.test_parser import TestReportParser
+from models.questionnaire import (
+    DIABETES_QUESTIONNAIRE, 
+    calculate_questionnaire_risk_score,
+    format_questionnaire_for_llm
+)
 
 # Fallback to rule-based models if LLM not configured
 try:
@@ -58,6 +63,67 @@ def init_db():
 def index():
     return render_template('index.html')
 
+@app.route('/get-questionnaire', methods=['GET'])
+def get_questionnaire():
+    """Return the diabetes questionnaire"""
+    return jsonify(DIABETES_QUESTIONNAIRE)
+
+@app.route('/diagnose-questionnaire', methods=['POST'])
+def diagnose_questionnaire():
+    """Diagnose based on questionnaire only (no lab tests required)"""
+    data = request.json
+    
+    # Extract questionnaire answers
+    questionnaire_answers = data.get('questionnaire_answers', {})
+    
+    if not questionnaire_answers:
+        return jsonify({
+            'success': False,
+            'message': 'Please answer the questionnaire questions'
+        }), 400
+    
+    # Calculate risk score from questionnaire
+    questionnaire_data = {
+        'risk_score': calculate_questionnaire_risk_score(questionnaire_answers),
+        'formatted_answers': format_questionnaire_for_llm(questionnaire_answers)
+    }
+    
+    # Prepare patient data for LLM (questionnaire-only mode)
+    patient_data = {
+        'name': data.get('name', 'Patient'),
+        'questionnaire': questionnaire_data,
+        'mode': 'questionnaire_only'
+    }
+    
+    # Get diagnosis from LLM
+    diagnosis_result = diagnosis_model.predict(patient_data)
+    
+    # Get prescription
+    if USE_LLM:
+        prescription = prescription_engine.generate_prescription(
+            diagnosis_result,
+            patient_data
+        )
+    else:
+        prescription = prescription_engine.generate_prescription(
+            diagnosis_result['diagnosis'],
+            patient_data
+        )
+    
+    response = {
+        'diagnosis': diagnosis_result['diagnosis'],
+        'confidence': diagnosis_result['confidence'],
+        'risk_level': diagnosis_result['risk_level'],
+        'reasoning': diagnosis_result.get('reasoning', ''),
+        'key_factors': diagnosis_result.get('key_factors', []),
+        'prescription': prescription,
+        'questionnaire_risk': questionnaire_data['risk_score'],
+        'llm_powered': USE_LLM,
+        'mode': 'questionnaire_only'
+    }
+    
+    return jsonify(response)
+
 @app.route('/diagnose', methods=['POST'])
 def diagnose():
     data = request.json
@@ -71,6 +137,16 @@ def diagnose():
         'family_history': data.get('family_history', 'no'),
         'physical_activity': data.get('physical_activity', 'moderate')
     }
+    
+    # Process questionnaire if provided
+    questionnaire_data = None
+    if 'questionnaire_answers' in data:
+        questionnaire_answers = data['questionnaire_answers']
+        questionnaire_data = {
+            'risk_score': calculate_questionnaire_risk_score(questionnaire_answers),
+            'formatted_answers': format_questionnaire_for_llm(questionnaire_answers)
+        }
+        patient_data['questionnaire'] = questionnaire_data
     
     # Get diagnosis
     diagnosis_result = diagnosis_model.predict(patient_data)
@@ -90,7 +166,7 @@ def diagnose():
     # Save to database
     save_patient_record(patient_data, diagnosis_result, prescription)
     
-    return jsonify({
+    response = {
         'diagnosis': diagnosis_result['diagnosis'],
         'confidence': diagnosis_result['confidence'],
         'risk_level': diagnosis_result['risk_level'],
@@ -98,7 +174,13 @@ def diagnose():
         'key_factors': diagnosis_result.get('key_factors', []),
         'prescription': prescription,
         'llm_powered': USE_LLM
-    })
+    }
+    
+    # Include questionnaire risk score if available
+    if questionnaire_data:
+        response['questionnaire_risk'] = questionnaire_data['risk_score']
+    
+    return jsonify(response)
 
 def save_patient_record(patient_data, diagnosis_result, prescription):
     conn = sqlite3.connect('data/database.db')

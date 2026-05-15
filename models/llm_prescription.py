@@ -52,24 +52,62 @@ class LLMPrescriptionEngine:
     
     def _create_prescription_prompt(self, diagnosis_result, patient_data):
         """Create detailed prompt for prescription generation"""
-        return f"""
+        
+        # Check if this is questionnaire-only mode
+        is_questionnaire_only = patient_data.get('mode') == 'questionnaire_only'
+        
+        prompt = f"""
 Generate a comprehensive medical prescription for the following patient:
 
 Diagnosis Information:
-- Diagnosis: {diagnosis_result['diagnosis']}
+- Assessment: {diagnosis_result['diagnosis']}
 - Risk Level: {diagnosis_result['risk_level']}
 - Confidence: {diagnosis_result['confidence']}%
 - Reasoning: {diagnosis_result.get('reasoning', 'N/A')}
-
+"""
+        
+        if is_questionnaire_only:
+            # Questionnaire-only mode - no lab data
+            prompt += f"""
 Patient Details:
-- Age: {patient_data['age']} years
-- BMI: {patient_data['bmi']}
-- Glucose Level: {patient_data['glucose_level']} mg/dL
+- Name: {patient_data.get('name', 'Patient')}
+- Assessment Mode: Questionnaire-based screening (NO lab tests available)
+
+"""
+            # Add questionnaire data if available
+            if 'questionnaire' in patient_data:
+                q_data = patient_data['questionnaire']
+                prompt += f"""Questionnaire Risk Score: {q_data['risk_score']['risk_percentage']}%
+
+"""
+                # Add key questionnaire responses
+                for section in q_data['formatted_answers']:
+                    prompt += f"{section['section']}:\n"
+                    for response in section['responses'][:3]:  # First 3 responses per section
+                        prompt += f"  - {response['question']}: {response['answer']}\n"
+                    prompt += "\n"
+            
+            prompt += """
+IMPORTANT: Since this is a screening assessment WITHOUT lab tests:
+- Emphasize the need for laboratory testing (fasting glucose, HbA1c)
+- Provide preventive lifestyle recommendations
+- Focus on risk reduction strategies
+- Include when to seek medical attention
+"""
+        else:
+            # Standard mode with lab data
+            prompt += f"""
+Patient Details:
+- Age: {patient_data.get('age', 'N/A')} years
+- BMI: {patient_data.get('bmi', 'N/A')}
+- Glucose Level: {patient_data.get('glucose_level', 'N/A')} mg/dL
 - Family History: {patient_data.get('family_history', 'no')}
 - Physical Activity: {patient_data.get('physical_activity', 'moderate')}
-
+"""
+        
+        prompt += """
 Please provide a detailed prescription in the following JSON format:
-{{
+{
     "medications": ["medication 1 with dosage", "medication 2 with dosage"],
     "lifestyle": ["lifestyle recommendation 1", "lifestyle recommendation 2"],
     "diet": ["dietary recommendation 1", "dietary recommendation 2"],
@@ -79,14 +117,17 @@ Please provide a detailed prescription in the following JSON format:
     "warnings": ["warning 1", "warning 2"],
     "emergency_signs": ["sign 1", "sign 2"],
     "additional_notes": "Any additional important information"
-}}
+}
 
 Ensure all recommendations are evidence-based and appropriate for the patient's condition.
 """
+        
+        return prompt
     
     def _fallback_prescription(self, diagnosis_result, patient_data):
         """Fallback prescription if LLM fails"""
         diagnosis = diagnosis_result['diagnosis']
+        is_questionnaire_only = patient_data.get('mode') == 'questionnaire_only'
         
         prescription = {
             'medications': [],
@@ -100,7 +141,49 @@ Ensure all recommendations are evidence-based and appropriate for the patient's 
             'additional_notes': ''
         }
         
-        if 'Diabetes' in diagnosis:
+        if is_questionnaire_only:
+            # Questionnaire-only mode - focus on screening and prevention
+            prescription['medications'] = [
+                'No medications prescribed - lab tests required first'
+            ]
+            prescription['lifestyle'] = [
+                'Schedule appointment with healthcare provider',
+                'Get fasting glucose and HbA1c tests',
+                'Maintain healthy weight',
+                'Reduce stress through relaxation techniques'
+            ]
+            prescription['diet'] = [
+                'Reduce sugar and refined carbohydrates',
+                'Eat more vegetables, fruits, and whole grains',
+                'Control portion sizes',
+                'Limit processed foods and sugary drinks'
+            ]
+            prescription['exercise'] = [
+                'Aim for 150 minutes of moderate activity per week',
+                'Include both cardio and strength training',
+                'Start slowly if currently inactive'
+            ]
+            prescription['monitoring'] = [
+                'Get fasting blood glucose test',
+                'Get HbA1c test',
+                'Monitor symptoms and track changes',
+                'Regular blood pressure checks'
+            ]
+            prescription['follow_up'] = 'Schedule doctor appointment within 2-4 weeks for lab tests'
+            prescription['warnings'] = [
+                'This is a screening assessment, not a diagnosis',
+                'Lab tests are essential for definitive diagnosis',
+                'Do not start medications without doctor consultation'
+            ]
+            prescription['emergency_signs'] = [
+                'Extreme thirst or frequent urination',
+                'Unexplained rapid weight loss',
+                'Severe fatigue or confusion',
+                'Blurred vision or dizziness'
+            ]
+            prescription['additional_notes'] = 'This assessment is based on symptoms and risk factors. Laboratory testing is required for accurate diagnosis and treatment planning.'
+            
+        elif 'Diabetes' in diagnosis:
             prescription['medications'] = [
                 'Metformin 500mg - Take twice daily with meals',
                 'Consider insulin therapy if glucose remains uncontrolled'
@@ -151,7 +234,7 @@ Ensure all recommendations are evidence-based and appropriate for the patient's 
                 'Pre-diabetes is reversible with lifestyle changes'
             ]
         
-        else:  # Normal
+        else:  # Normal or Low Risk
             prescription['lifestyle'] = [
                 'Maintain balanced diet',
                 'Regular physical activity',
